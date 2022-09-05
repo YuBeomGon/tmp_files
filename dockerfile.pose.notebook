@@ -1,0 +1,14 @@
+FROM beomgon/deepstream:pose_base
+ARG JUPYTER_PASSWORD=kk3249
+COPY dockerfiles/jupyter-password.py /usr/local/bin/jupyter-password.py
+RUN chmod u+x /usr/local/bin/jupyter-password.py
+RUN pip3 install jupyterlab ipykernel gpustat onnx onnxruntime mediapipe
+RUN jupyter notebook --generate-config
+RUN python3 /usr/local/bin/jupyter-password.py $JUPYTER_PASSWORD > /root/.jupyter/jupyter_notebook_config.json
+ENV PYTHONUNBUFFERED 1
+ENV SHELL /bin/bash
+WORKDIR /project/pose
+
+#  RUN mkdir -p notebook
+# COPY notebook/* /project/pose/notebook/
+ENTRYPOINT ["jupyter-lab", "--allow-root", "--ip", "0.0.0.0"]

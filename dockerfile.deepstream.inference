@@ -1,0 +1,21 @@
+FROM nvcr.io/nvidia/deepstream:6.1.1-devel
+LABEL maintainer="DeepStream"
+
+ENV NVIDIA_DRIVER_CAPABILITIES $NVIDIA_DRIVER_CAPABILITIES,video
+ENV DEEPSTREAM_DIR /opt/nvidia/deepstream/deepstream-6.1
+
+RUN apt update && \
+    apt install -y bash \
+		build-essential \
+		sudo \
+		vim \
+		git
+
+WORKDIR /opt/nvidia/deepstream/deepstream-6.1/sources/apps/sample_apps/
+RUN git clone https://github.com/NVIDIA-AI-IOT/deepstream_pose_estimation.git
+
+RUN sudo cp deepstream_pose_estimation/bin/x86/* /opt/nvidia/deepstream/deepstream-6.1/lib
+WORKDIR /opt/nvidia/deepstream/deepstream-6.1/sources/apps/sample_apps/deepstream_pose_estimation
+
+RUN sudo sed -i 's/NVDS_VERSION:=5.0/NVDS_VERSION:=6.1/' Makefile
+RUN sudo make
