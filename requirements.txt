@@ -1,0 +1,20 @@
+#torch
+#torchvision
+#torchaudio
+#cudatoolkit==11.6
+packaging
+tqdm
+cython
+pycocotools
+pandas
+scikit-learn
+albumentations
+Pillow
+opencv-python
+gpustat
+ipykernel
+jupyterlab
+wandb
+timm
+einops
+# apex # need to install manually from git
