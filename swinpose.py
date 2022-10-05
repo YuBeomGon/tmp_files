@@ -1,6 +1,7 @@
 import torch
 import torch.nn as nn
 from .common import *
+from .fpn import *
 import timm
 import math
 
@@ -416,15 +417,18 @@ class BasicLayer(nn.Module):
         else:
             self.downsample = None
 
-    def forward(self, x):
+    def forward(self, x, H, W):
         for blk in self.blocks:
             if self.use_checkpoint:
                 x = checkpoint.checkpoint(blk, x)
             else:
                 x = blk(x)
         if self.downsample is not None:
-            x = self.downsample(x)
-        return x
+            x_down = self.downsample(x)
+            Wh, Ww = (H + 1) // 2, (W + 1) // 2
+            return x, H, W, x_down, Wh, Ww   
+        
+        return x, H, W, x, H, W
 
     def extra_repr(self) -> str:
         return f"dim={self.dim}, input_resolution={self.input_resolution}, depth={self.depth}"
@@ -472,9 +476,13 @@ class PatchEmbed(nn.Module):
         # FIXME look at relaxing size constraints
         assert H == self.img_size[0] and W == self.img_size[1], \
             f"Input image size ({H}*{W}) doesn't match model ({self.img_size[0]}*{self.img_size[1]})."
-        x = self.proj(x).flatten(2).transpose(1, 2)  # B Ph*Pw C
+        
+        x = self.proj(x)  # B C Wh Ww
         if self.norm is not None:
+            Wh, Ww = x.size(2), x.size(3)
+            x = x.flatten(2).transpose(1, 2)
             x = self.norm(x)
+            x = x.transpose(1, 2).view(-1, self.embed_dim, Wh, Ww)
         return x
 
     def flops(self):
@@ -516,7 +524,7 @@ class SwinTransformer(nn.Module):
                  window_size=12, mlp_ratio=4., qkv_bias=True, qk_scale=None,
                  drop_rate=0., attn_drop_rate=0., drop_path_rate=0.1,
                  norm_layer=nn.LayerNorm, ape=False, patch_norm=True,
-                 use_checkpoint=False, fused_window_process=False, **kwargs):
+                 use_checkpoint=False, fused_window_process=False, out_indices=[0, 1, 2, 3],  **kwargs):
         super().__init__()
 
         self.num_classes = num_classes
@@ -526,6 +534,7 @@ class SwinTransformer(nn.Module):
         self.patch_norm = patch_norm
         self.num_features = int(embed_dim * 2 ** (self.num_layers - 1))
         self.mlp_ratio = mlp_ratio
+        self.out_indices = out_indices
 
         # split image into non-overlapping patches
         self.patch_embed = PatchEmbed(
@@ -564,9 +573,19 @@ class SwinTransformer(nn.Module):
                                fused_window_process=fused_window_process)
             self.layers.append(layer)
 
-        self.norm = norm_layer(self.num_features)
+        # self.norm = norm_layer(self.num_features)
         # self.avgpool = nn.AdaptiveAvgPool1d(1)
         # self.head = nn.Linear(self.num_features, num_classes) if num_classes > 0 else nn.Identity()
+        
+        num_features = [int(embed_dim * 2 ** i) for i in range(self.num_layers)]
+        self.num_features = num_features
+        print(num_features)
+        
+        # add a norm layer for each output
+        for i_layer in out_indices:
+            layer = norm_layer(num_features[i_layer])
+            layer_name = f'norm{i_layer}'
+            self.add_module(layer_name, layer)        
 
         self.apply(self._init_weights)
         print('swin transfomer init is done')
@@ -576,7 +595,7 @@ class SwinTransformer(nn.Module):
             trunc_normal_(m.weight, std=.02)
             if isinstance(m, nn.Linear) and m.bias is not None:
                 nn.init.constant_(m.bias, 0)
-        elif isinstance(m, nn.LayerNorm):
+        elif isinstance(m, (nn.BatchNorm2d, nn.LayerNorm)):
             nn.init.constant_(m.bias, 0)
             nn.init.constant_(m.weight, 1.0)
 
@@ -590,17 +609,33 @@ class SwinTransformer(nn.Module):
 
     def forward_features(self, x):
         x = self.patch_embed(x)
+        Wh, Ww = x.size(2), x.size(3)
+
         if self.ape:
-            x = x + self.absolute_pos_embed
+            absolute_pos_embed = F.interpolate(self.absolute_pos_embed, size=(Wh, Ww), mode='bicubic')
+            x = (x + absolute_pos_embed).flatten(2).transpose(1, 2)  # B Wh*Ww C
+        else :
+            x = x.flatten(2).transpose(1, 2)
+            
         x = self.pos_drop(x)
 
-        for layer in self.layers:
-            x = layer(x)
+        outs = []
+        for i in range(len(self.layers)):
+            layer = self.layers[i]            
+            x_out, H, W, x, Wh, Ww = layer(x, Wh, Ww)
+            
+            if i in self.out_indices:
+                norm_layer = getattr(self, f'norm{i}')
+                x_out = norm_layer(x_out)
 
-        x = self.norm(x)
+                out = x_out.view(x.shape[0], H, W, self.num_features[i]).permute(0, 3, 1, 2).contiguous()
+                outs.append(out)            
+            
+
+        # x = self.norm(x)
         # x = self.avgpool(x.transpose(1, 2))  # B C 1
         # x = torch.flatten(x, 1)
-        return x
+        return tuple(outs)
 
     # def forward(self, x):
     #     x = self.forward_features(x)
@@ -625,27 +660,26 @@ class SwinBackbone(torch.nn.Module):
     
     def forward(self, x):
         x = self.swin.forward_features(x)
-        B, L, C = x.shape
-        L = int(math.sqrt(L))
-        x = x.view(B, L, L, C).permute(0,3,1,2)
         return x
 
 
-def _swin_pose(cmap_channels, paf_channels, upsample_channels, swin, feature_channels, num_upsample, num_flat):
-    model = torch.nn.Sequential(
-        SwinBackbone(swin),
-        CmapPafHead(feature_channels, cmap_channels, paf_channels, upsample_channels, num_upsample=num_upsample, num_flat=num_flat)
-    )
-    return model
+# def _swin_pose(cmap_channels, paf_channels, upsample_channels, swin, feature_channels, num_upsample, num_flat):
+#     model = torch.nn.Sequential(
+#         SwinBackbone(swin),
+#         CmapPafHead(feature_channels, cmap_channels, paf_channels, upsample_channels, num_upsample=num_upsample, num_flat=num_flat)
+#     )
+#     return model
      
-def _swin_pose_att(cmap_channels, paf_channels, upsample_channels, swin, feature_channels, num_upsample, num_flat):
+def _swin_pose_att(cmap_channels, paf_channels, upsample_channels, swin, feature_channels, num_upsample, num_flat, in_channel_list):
     model = torch.nn.Sequential(
         SwinBackbone(swin),
-        CmapPafHeadAttention(feature_channels, cmap_channels, paf_channels, upsample_channels, num_upsample=num_upsample, num_flat=num_flat)
+        FeaturePyramidNetwork(in_channel_list, out_channels=upsample_channels),
+        CmapPafConv(feature_channels, cmap_channels, paf_channels, upsample_channels, num_upsample=0, num_flat=num_flat)
+        
     )
     return model 
 
-def swin_tiny_baseline_att(cmap_channels, paf_channels, upsample_channels=256, pretrained=True, num_upsample=3, num_flat=0):
+def swinpose_tiny_baseline_att(cmap_channels, paf_channels, upsample_channels=256, pretrained=True, num_upsample=3, num_flat=0):
     # swin = timm.create_model('swin_tiny_patch4_window12_384', pretrained=pretrained)
     swin = SwinTransformer(img_size=384, patch_size=4, in_chans=3,
                            embed_dim=96, depths=[2, 2, 6, 2], num_heads=[3, 6, 12, 24],
@@ -654,37 +688,26 @@ def swin_tiny_baseline_att(cmap_channels, paf_channels, upsample_channels=256, p
                            norm_layer=nn.LayerNorm, ape=False, patch_norm=True,
                            use_checkpoint=False, fused_window_process=False
                           )
-    return _swin_pose_att(cmap_channels, paf_channels, upsample_channels, swin, 768, num_upsample, num_flat)
-
-# def swin_tiny_baseline_att_v1(cmap_channels, paf_channels, upsample_channels=256, pretrained=True, num_upsample=3, num_flat=0):
-#     # swin = timm.create_model('swin_tiny_patch4_window12_384', pretrained=pretrained)
-#     swin = SwinTransformer(img_size=448, patch_size=4, in_chans=3,
-#                            embed_dim=96, depths=[2, 2, 6, 2], num_heads=[3, 6, 12, 24],
-#                            window_size=7, mlp_ratio=4., qkv_bias=True, qk_scale=None,
-#                            drop_rate=0., attn_drop_rate=0., drop_path_rate=0.1,
-#                            norm_layer=nn.LayerNorm, ape=False, patch_norm=True,
-#                            use_checkpoint=False, fused_window_process=False
-#                           )
-#     return _swin_pose_att(cmap_channels, paf_channels, upsample_channels, swin, 768, num_upsample, num_flat)
+    return _swin_pose_att(cmap_channels, paf_channels, upsample_channels, swin, 768, num_upsample, num_flat, in_channel_list=[96,192,384,768])
 
 
-def swin_small_baseline_att(cmap_channels, paf_channels, upsample_channels=256, pretrained=True, num_upsample=3, num_flat=0):
-    swin = SwinTransformer(img_size=384, patch_size=4, in_chans=3, 
+def swinpose_small_baseline_att(cmap_channels, paf_channels, upsample_channels=256, pretrained=True, num_upsample=3, num_flat=0):
+    swin = SwinTransformer(img_size=320, patch_size=4, in_chans=3, 
                        embed_dim=96, depths=[2, 2, 8, 2], num_heads=[3, 6, 12, 24],
-                       window_size=12, mlp_ratio=4., qkv_bias=True, qk_scale=None,
+                       window_size=10, mlp_ratio=4., qkv_bias=True, qk_scale=None,
                        drop_rate=0., attn_drop_rate=0., drop_path_rate=0.1,
                        norm_layer=nn.LayerNorm, ape=False, patch_norm=True,
                        use_checkpoint=False, fused_window_process=False
                       )
-    return _swin_pose_att(cmap_channels, paf_channels, upsample_channels, swin, 768, num_upsample, num_flat)
+    return _swin_pose_att(cmap_channels, paf_channels, upsample_channels, swin, 768, num_upsample, num_flat, in_channel_list=[96,192,384,768])
 
 
-def swin_base_baseline_att(cmap_channels, paf_channels, upsample_channels=256, pretrained=True, num_upsample=3, num_flat=0):
-    swin = SwinTransformer(img_size=384, patch_size=4, in_chans=3,
+def swinpose_base_baseline_att(cmap_channels, paf_channels, upsample_channels=256, pretrained=True, num_upsample=3, num_flat=0):
+    swin = SwinTransformer(img_size=320, patch_size=4, in_chans=3,
                        embed_dim=128, depths=[2, 2, 12, 2], num_heads=[4, 8, 16, 32],
-                       window_size=12, mlp_ratio=4., qkv_bias=True, qk_scale=None,
+                       window_size=10, mlp_ratio=4., qkv_bias=True, qk_scale=None,
                        drop_rate=0., attn_drop_rate=0., drop_path_rate=0.1,
                        norm_layer=nn.LayerNorm, ape=False, patch_norm=True,
                        use_checkpoint=False, fused_window_process=False
                       )
-    return _swin_pose_att(cmap_channels, paf_channels, upsample_channels, swin, 1024, num_upsample, num_flat)
+    return _swin_pose_att(cmap_channels, paf_channels, upsample_channels, swin, 1024, num_upsample, num_flat, in_channel_list=[128,256,512,1024])

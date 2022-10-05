@@ -51,16 +51,17 @@ import collections.abc
 
 class SwinBackbone(torch.nn.Module):
     
-    def __init__(self, swin):
+    def __init__(self, swin, shape):
         super(SwinBackbone, self).__init__()
         self.swin = swin
+        self.shape = shape
     
     def forward(self, x):
         x = self.swin.forward_features(x)
         B, L, C = x.shape
-        L = int(math.sqrt(L))
+        # L = int(math.sqrt(L))
         # x = x.view(B, L, L, C).permute(0,3,1,2)
-        x = x.permute(0,2,1).contiguous().view(B,C,L,L)
+        x = x.permute(0,2,1).view(B,C,self.shape[0],self.shape[1]).contiguous()
         return x
 
 
@@ -72,28 +73,33 @@ def _swin_pose(cmap_channels, paf_channels, upsample_channels, swin, feature_cha
     return model
 
        
-def _swin_pose_att(cmap_channels, paf_channels, upsample_channels, swin, feature_channels, num_upsample, num_flat):
+def _swin_pose_att(cmap_channels, paf_channels, upsample_channels, swin, feature_channels, num_upsample, num_flat, shape):
     model = torch.nn.Sequential(
-        SwinBackbone(swin),
+        SwinBackbone(swin, shape),
         CmapPafHeadAttention(feature_channels, cmap_channels, paf_channels, upsample_channels, num_upsample=num_upsample, num_flat=num_flat)
     )
     return model 
 
 def swin_tiny_baseline_att(cmap_channels, paf_channels, upsample_channels=256, pretrained=True, num_upsample=3, num_flat=0):
     swin = timm.create_model('swin_tiny_patch4_window7_224', pretrained=pretrained)
-    return _swin_pose_att(cmap_channels, paf_channels, upsample_channels, swin, 768, num_upsample, num_flat)
+    return _swin_pose_att(cmap_channels, paf_channels, upsample_channels, swin, 768, num_upsample, num_flat, (7,7))
 
 
 def swin_small_baseline_att(cmap_channels, paf_channels, upsample_channels=256, pretrained=True, num_upsample=3, num_flat=0):
     swin = timm.create_model('swin_small_patch4_window7_224', pretrained=pretrained)
-    return _swin_pose_att(cmap_channels, paf_channels, upsample_channels, swin, 768, num_upsample, num_flat)
+    return _swin_pose_att(cmap_channels, paf_channels, upsample_channels, swin, 768, num_upsample, num_flat, (7,7))
 
 
 def swin_base_baseline_att(cmap_channels, paf_channels, upsample_channels=256, pretrained=True, num_upsample=3, num_flat=0):
     swin = timm.create_model('swin_base_patch4_window12_384', pretrained=pretrained)
-    return _swin_pose_att(cmap_channels, paf_channels, upsample_channels, swin, 1024, num_upsample, num_flat)
+    return _swin_pose_att(cmap_channels, paf_channels, upsample_channels, swin, 1024, num_upsample, num_flat, (12, 12))
 
 
 def swin_large_baseline_att(cmap_channels, paf_channels, upsample_channels=256, pretrained=True, num_upsample=3, num_flat=0):
     swin = timm.create_model('swin_large_patch4_window12_384', pretrained=pretrained)
-    return _swin_pose_att(cmap_channels, paf_channels, upsample_channels, swin, 1536, num_upsample, num_flat)
+    return _swin_pose_att(cmap_channels, paf_channels, upsample_channels, swin, 1536, num_upsample, num_flat, (12, 12))
+
+
+def swin_v2_tiny_baseline_att(cmap_channels, paf_channels, upsample_channels=256, pretrained=True, num_upsample=3, num_flat=0):
+    swin = timm.create_model('swinv2_tiny_window8_256', pretrained=pretrained)
+    return _swin_pose_att(cmap_channels, paf_channels, upsample_channels, swin, 768, num_upsample, num_flat, (8, 8))
