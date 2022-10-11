@@ -1,0 +1,11 @@
+sudo curl -L \ 
+"https://github.com/docker/compose/releases/download/1.28.5/dockercompose-$(uname -s)-$(uname -m)" \ 
+-o /usr/local/bin/docker-compose
+# 이 명령어는 외부에서 그대로 파일을 가져와서 현재의 시스템에 올려 놓는 것이다.
+# 결과적으로 "/usr/local/bin/" 경로에 "docker-compose" 라는 이름의 파일로 다운된다.
+# 참고) https://github.com/docker/compose/releases 에서 최신 버전 확인이 가능하다.
+# 최신 버전을 설치하고 싶다면 위 명령어에 보이는 1.28.5 라는 버전 숫자를 바꿔주면 된다!
+
+sudo chmod +x /usr/local/bin/docker-compose  # chmod 를 통해서 실행이 가능하게 세팅
+
+docker-compose -v # docker-compose 명령이 제대로 먹히는 지 확인한다.
