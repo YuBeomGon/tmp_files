@@ -9,3 +9,26 @@ sudo curl -L \
 sudo chmod +x /usr/local/bin/docker-compose  # chmod 를 통해서 실행이 가능하게 세팅
 
 docker-compose -v # docker-compose 명령이 제대로 먹히는 지 확인한다.
+
+
+
+
+
+version: '3'
+#
+services:
+#
+    jupyter-ds:
+      build:
+        context: .
+        dockerfile: ./dockerfiles/dockerfile-jupyter
+      user: root
+      environment:
+        - GRANT_SUDO=yes
+        - JUPYTER_ENABLE_LAB=yes
+        - JUPYTER_TOKEN={YOUR-PASSWORD}
+      volumes:
+        - /mnt/c/Users/{YOUR-DIR}:/home/jovyan/github-anari
+      ports:
+        - "8888:8888"
+      container_name: "jupyter-ds"
