@@ -38,82 +38,6 @@ mean = np.array([0.485, 0.456, 0.406])
 std = np.array([0.229, 0.224, 0.225])
 device = torch.device('cuda')
 SIZE = 384
-BOX_COLOR = (255, 0, 0) # Red
-TEXT_COLOR = (255, 255, 255) # White
-#font_path = 'usr/share/fonts/truetype/nanum/NanumMyeongjo.ttf'
-#font_path = '/usr/share/fonts/truetype/nanum/NanumMyeongjo.ttf'
-#font = ImageFont.truetype(font_path, 20)
-
-
-class DrawObjects(object):
-    def __init__(self, topology):
-        self.topology = topology
-        self.font_path = '/usr/share/fonts/truetype/nanum/NanumMyeongjo.ttf'
-        self.font = ImageFont.truetype(self.font_path, 10)
-        self.pog_list = []
-
-    def __call__(self, image, object_counts, objects, normalized_peaks, p_name):
-        topology = self.topology
-        height = image.shape[0]
-        width = image.shape[1]
-        K = topology.shape[0]
-        count = int(object_counts[0])
-        K = topology.shape[0]
-        xmin = ymin = 0
-        self.pog_list.append(p_name)
-        for i in range(count):
-            color = (0, 255, 0)
-            obj = objects[0][i]
-            C = obj.shape[0]
-            for j in range(C):
-                k = int(obj[j])
-                if k >= 0:
-                    peak = normalized_peaks[0][j][k]
-                    x = round(float(peak[1]) * width)
-                    y = round(float(peak[0]) * height)
-                    cv2.circle(image, (x, y), 3, color, 2)
-                    if j == 0 :
-                        xmin = x
-                        ymin = y
-
-            for k in range(K):
-                c_a = topology[k][2]
-                c_b = topology[k][3]
-                if obj[c_a] >= 0 and obj[c_b] >= 0:
-                    peak0 = normalized_peaks[0][c_a][obj[c_a]]
-                    peak1 = normalized_peaks[0][c_b][obj[c_b]]
-                    x0 = round(float(peak0[1]) * width)
-                    y0 = round(float(peak0[0]) * height)
-                    x1 = round(float(peak1[1]) * width)
-                    y1 = round(float(peak1[0]) * height)
-                    cv2.line(image, (x0, y0), (x1, y1), color, 2)
-
-        if len(self.pog_list) > 0 :                   
-            cv2.rectangle(image, (0, 0), (200, 100), color=BOX_COLOR, thickness=2)
-        if count > 0 :
-            cv2.rectangle(image, (xmin, ymin), (xmin+200, ymin+100), color=BOX_COLOR, thickness=2)
-            ((text_width, text_height), _) = cv2.getTextSize(p_name, cv2.FONT_HERSHEY_SIMPLEX, 0.35, 1) 
-
-        pil_image = Image.fromarray(image)
-        draw = ImageDraw.Draw(pil_image)
-
-        if len(self.pog_list) > 0 :                   
-            self.draw_pogs(draw)
-
-        if count > 0 : 
-            draw.text((xmin+5,ymin+5), str(p_name)[:20], fill=(0,0,255), font=self.font)
-
-        image = np.array(pil_image)
-
-        return image
-
-    def draw_pogs(self, draw) :
-        for i, pog in enumerate(self.pog_list) :
-            draw.text((5, i*15+5), str(pog)[:20], fill=(0,0,255), font=self.font)
-
-
-
-
 
 def load_model(fname='human_pose.json', model_name='efficientnet_b3_baseline_att') :
     with open(fname, 'r') as f :
@@ -214,8 +138,6 @@ def writeVideo():
     # out.release()
     cv2.destroyAllWindows()
     #writer.close()
-
-
 
 if __name__ == "__main__":
     
