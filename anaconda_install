@@ -1,0 +1,34 @@
+
+# Prerequisites
+sudo apt-get install libgl1-mesa-glx libegl1-mesa libxrandr2 libxrandr2 libxss1 libxcursor1 libxcomposite1 libasound2 libxi6 libxtst6
+
+
+For x86 systems.
+
+In your browser, download the Anaconda installer for Linux.
+
+Search for “terminal” in your applications and click to open.
+
+(Recommended) Verify the installer’s data integrity with SHA-256. For more information on hash verification, see cryptographic hash validation.
+
+In the terminal, run the following:
+
+shasum -a 256 /PATH/FILENAME
+# Replace /PATH/FILENAME with your installation's path and filename.
+Install for Python 3.7 or 2.7 in the terminal:
+
+For Python 3.7, enter the following:
+
+# Include the bash command regardless of whether or not you are using the Bash shell
+bash ~/Downloads/Anaconda3-2020.05-Linux-x86_64.sh
+# Replace ~/Downloads with your actual path
+# Replace the .sh file name with the name of the file you downloaded
+For Python 2.7, enter the following:
+
+# Include the bash command regardless of whether or not you are using the Bash shell
+bash ~/Downloads/Anaconda2-2019.10-MacOSX-x86_64.sh
+# Replace ~/Downloads with your actual path
+# Replace the .sh file name with the name of the file you downloaded
+Press Enter to review the license agreement. Then press and hold Enter to scroll.
+
+Enter “yes” to agree to the license agreement.
